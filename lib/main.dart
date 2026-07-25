@@ -55,11 +55,23 @@ class _FieldHomePageState extends State<FieldHomePage> {
   final _safetyCtrl = TextEditingController();
   final _nextCtrl = TextEditingController();
   final _serverCtrl = TextEditingController(text: 'http://127.0.0.1:8080/v1');
+  final Map<String, TextEditingController> _captionCtrls = {};
 
   bool _busy = false;
   bool _useLocalServer = false;
   bool _autoDescribe = true;
   String _status = '';
+
+  TextEditingController _captionCtrlFor(EvidencePhoto photo) {
+    return _captionCtrls.putIfAbsent(
+      photo.id,
+      () => TextEditingController(text: photo.caption),
+    );
+  }
+
+  void _disposeCaption(String id) {
+    _captionCtrls.remove(id)?.dispose();
+  }
 
   @override
   void initState() {
@@ -85,6 +97,9 @@ class _FieldHomePageState extends State<FieldHomePage> {
     _safetyCtrl.dispose();
     _nextCtrl.dispose();
     _serverCtrl.dispose();
+    for (final c in _captionCtrls.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -124,6 +139,7 @@ class _FieldHomePageState extends State<FieldHomePage> {
       );
       setState(() {
         photo.caption = result.caption;
+        _captionCtrlFor(photo).text = result.caption;
         _applySuggested(result.suggestedFields);
         _status = result.engineNote;
       });
@@ -171,6 +187,10 @@ class _FieldHomePageState extends State<FieldHomePage> {
   }
 
   void _syncControllersToReport() {
+    for (final photo in _report.photos) {
+      final c = _captionCtrls[photo.id];
+      if (c != null) photo.caption = c.text;
+    }
     _report
       ..claimNumber = _claimCtrl.text.trim()
       ..policyNumber = _policyCtrl.text.trim()
@@ -354,7 +374,9 @@ class _FieldHomePageState extends State<FieldHomePage> {
                 'No photos yet — Evidence → gallery (Windows) or camera (phone).',
               ),
             ),
-          ..._report.photos.map((photo) {
+          ..._report.photos.asMap().entries.map((entry) {
+            final index = entry.key;
+            final photo = entry.value;
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               child: Padding(
@@ -362,6 +384,30 @@ class _FieldHomePageState extends State<FieldHomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Photo ${index + 1}',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          tooltip: 'Remove',
+                          onPressed: _busy
+                              ? null
+                              : () => setState(() {
+                                    _disposeCaption(photo.id);
+                                    _report.photos = [
+                                      for (var i = 0;
+                                          i < _report.photos.length;
+                                          i++)
+                                        if (i != index) _report.photos[i],
+                                    ];
+                                  }),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
+                    ),
                     if (File(photo.path).existsSync())
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
@@ -372,12 +418,14 @@ class _FieldHomePageState extends State<FieldHomePage> {
                         ),
                       ),
                     const SizedBox(height: 8),
-                    Text(
-                      photo.caption.isEmpty
-                          ? 'No caption yet'
-                          : photo.caption,
-                      maxLines: 12,
-                      overflow: TextOverflow.ellipsis,
+                    TextField(
+                      controller: _captionCtrlFor(photo),
+                      decoration: const InputDecoration(
+                        labelText: 'Caption / field notes',
+                        alignLabelWithHint: true,
+                      ),
+                      maxLines: 8,
+                      onChanged: (v) => photo.caption = v,
                     ),
                     const SizedBox(height: 8),
                     FilledButton.tonalIcon(

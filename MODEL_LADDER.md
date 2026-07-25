@@ -23,11 +23,11 @@ All three have **LiteRT** (`.litertlm`) community bundles for Android via Google
 
 ## In this Flutter app today
 
-- Camera / gallery evidence
-- Claim-line prompts (auto / homeowners / commercial)
+- Camera / gallery evidence (auto-describe after capture)
+- Claim-line field scaffolds (auto / homeowners / commercial) — editable drafts offline now
 - Tier picker (records which model the packet expects)
 - Optional **local OpenAI-compatible server** (LiteRT-LM CLI on PC/LAN — still offline if no cloud)
-- Prompt-only mode until LiteRT is embedded
+- Real on-device LiteRT embed still next; scaffold keeps the agent loop moving
 - Export MD + JSON packet (`suiteRole: B`) for later merge with Product A
 
 ## Not in scope for B
