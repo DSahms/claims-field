@@ -11,7 +11,7 @@ import '../vlm/vlm_engine.dart';
 
 class ClaimsFieldVlmService {
   ClaimsFieldVlmService({VlmEngine? engine})
-      : _engine = engine ?? FieldScaffoldEngine(VlmTier.smolVlm500m);
+      : _engine = engine ?? FieldScaffoldEngine(VlmTier.qwen2Vl2b);
 
   VlmEngine _engine;
   final _uuid = const Uuid();
@@ -142,6 +142,8 @@ class ClaimsFieldVlmService {
     return {
       'damageSummary':
           caption.length > 400 ? caption.substring(0, 400) : caption,
+      'lossNarrative':
+          caption.length > 600 ? caption.substring(0, 600) : caption,
       'severity': '',
       'affectedAreas': '',
       'safetyNotes': '',

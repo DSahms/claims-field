@@ -5,13 +5,9 @@ import '../domain/models.dart';
 /// Offline vision→text for agent field docs.
 ///
 /// Deployment ladder (all offline when on-device):
-/// 1. SmolVLM-500M — phone you already have
-/// 2. SmolVLM2-2.2B — step-up, LiteRT `.litertlm` via Google AI Edge Gallery / LiteRT-LM
-/// 3. Qwen2-VL-2B — alternate step-up (OCR/docs), also LiteRT
-///
-/// Engines:
-/// - [FieldScaffoldEngine] — structured draft from photo + claim line (works offline now)
-/// - [OpenAiCompatibleLocalEngine] — contract for local LiteRT-LM / OpenAI-compatible server
+/// 1. SmolVLM-500M — phone baseline
+/// 2. SmolVLM2-2.2B — step-up same family
+/// 3. Qwen2-VL-2B — **default** (OCR / VIN / docs)
 abstract class VlmEngine {
   VlmTier get tier;
   String get statusLabel;
@@ -37,35 +33,37 @@ class VlmDescribeResult {
   final String raw;
 }
 
-/// Insurance-shaped prompts — same job whether 500M or 2.2B answers them.
 class DamagePrompts {
   static String systemFor(ClaimLine line) => '''
 You are an on-device field assistant for an insurance adjuster / agent.
-Claim line: ${line.label}.
+Claim line: ${line.label} (${line.acordHint}).
 Describe ONLY what is visible. Do not invent policy coverage or liability.
-Be precise: materials, location on the property/vehicle, extent, weather/water if relevant.
-Flag hazards (structural, electrical, mold risk, road safety) briefly.
-Output plain language an adjuster can paste into a report.
+Be precise: materials, location, extent, weather/water if relevant.
+For auto: call out VIN/plate text if readable (OCR).
+Flag hazards briefly.
+Output plain language an adjuster can paste into a ${line.acordHint} / FNOL draft.
 ''';
 
   static String userFor(ClaimLine line, {String? extra}) {
     final base = switch (line) {
-      ClaimLine.auto =>
-        'Describe vehicle damage for a first-notice / field report: panels, glass, tires, fluids, airbags, point of impact, driveability concerns.',
-      ClaimLine.homeowners =>
-        'Describe property damage for a homeowners field report: room/area, materials, water/fire/storm indicators, contents vs structure, severity.',
-      ClaimLine.commercial =>
+      ClaimLine.auto || ClaimLine.commercialAuto =>
+        'Describe vehicle damage for ACORD 2 / field report: panels, glass, tires, fluids, airbags, point of impact, driveability. Read VIN or plate if visible.',
+      ClaimLine.homeowners || ClaimLine.renters =>
+        'Describe property/contents damage for ACORD 1: room/area, materials, water/fire/storm indicators, contents vs structure, severity.',
+      ClaimLine.commercialProperty =>
         'Describe commercial property damage: building systems, inventory, business interruption clues, safety hazards.',
+      ClaimLine.generalLiability =>
+        'Describe the premises / hazard for ACORD 3: floor condition, defects, lighting, what a claimant might have contacted, evidence of injury scene.',
+      ClaimLine.workersComp =>
+        'Describe the worksite injury scene for FROI support: equipment, body-position clues, hazards — do not diagnose.',
       ClaimLine.other =>
-        'Describe the damage in this photo for an insurance field report.',
+        'Describe the damage in this photo for an insurance field report / FNOL.',
     };
     if (extra == null || extra.trim().isEmpty) return base;
     return '$base\nAgent note: $extra';
   }
 }
 
-/// Works tonight with no model: builds a claim-line checklist the agent edits.
-/// When LiteRT / local server is wired, swap this for real vision captions.
 class FieldScaffoldEngine implements VlmEngine {
   FieldScaffoldEngine(this.tier);
 
@@ -82,19 +80,16 @@ class FieldScaffoldEngine implements VlmEngine {
     required ClaimLine claimLine,
     String? extraContext,
   }) async {
-    final file = File(imagePath);
-    final exists = await file.exists();
-    final bytes = exists ? await file.length() : 0;
-    final name = imagePath.split(RegExp(r'[\\/]')).last;
-    final when = DateTime.now().toLocal().toIso8601String().split('.').first;
+    final file = await _fileMeta(imagePath);
     final checklist = _checklistFor(claimLine);
     final agentNote = (extraContext == null || extraContext.trim().isEmpty)
         ? ''
         : '\nAgent note: ${extraContext.trim()}';
+    final when = DateTime.now().toLocal().toIso8601String().split('.').first;
 
     final caption = '''
-FIELD DRAFT — ${claimLine.label} · pending ${tier.label} vision
-Photo: $name${exists ? ' · ${(bytes / 1024).toStringAsFixed(0)} KB' : ' · (file missing)'}
+FIELD DRAFT — ${claimLine.label} · ${claimLine.acordHint} · pending ${tier.label}
+Photo: ${file['name']}${file['meta']}
 Captured / described: $when
 
 Visible damage (edit):
@@ -102,45 +97,84 @@ $checklist
 $agentNote
 
 Hazards to confirm: structural · electrical · slip/trip · roadworthiness · mold/water
-Next: complete report fields → export packet.
+OCR targets (Qwen): VIN · plate · labels · paperwork in frame
+Next: fill required FNOL fields → export packet.
 '''
         .trim();
 
+    final suggested = <String, String>{
+      'damageSummary':
+          '${claimLine.label} — photo on file (${file['name']}). Agent to refine from checklist.',
+      'severity': 'TBD — agent estimate after walkthrough',
+      'affectedAreas': checklist.split('\n').take(3).join('; '),
+      'safetyNotes': 'Confirm scene safe before further inspection.',
+      'recommendedNext':
+          'Complete ${claimLine.acordHint} FNOL fields; attach evidence; schedule follow-up if needed.',
+      'lossNarrative': 'Pending agent narrative from walkthrough / interview packet A.',
+    };
+
+    if (claimLine == ClaimLine.auto ||
+        claimLine == ClaimLine.commercialAuto) {
+      suggested['vehicleYearMakeModel'] = 'TBD from photo / registration';
+      suggested['vin'] = 'OCR with Qwen when plate/VIN in frame';
+    }
+    if (claimLine == ClaimLine.homeowners ||
+        claimLine == ClaimLine.renters ||
+        claimLine == ClaimLine.commercialProperty) {
+      suggested['kindOfLoss'] = 'TBD — fire / water / wind / theft / other';
+    }
+
     return VlmDescribeResult(
       caption: caption,
-      suggestedFields: {
-        'damageSummary':
-            '${claimLine.label} — photo on file ($name). Agent to refine from checklist.',
-        'severity': 'TBD — agent estimate after walkthrough',
-        'affectedAreas': checklist.split('\n').take(3).join('; '),
-        'safetyNotes': 'Confirm scene safe before further inspection.',
-        'recommendedNext':
-            'Complete field notes; attach evidence packet; schedule follow-up if needed.',
-      },
+      suggestedFields: suggested,
       engineNote: statusLabel,
       raw: DamagePrompts.userFor(claimLine, extra: extraContext),
     );
   }
 
+  Future<Map<String, String>> _fileMeta(String imagePath) async {
+    final file = File(imagePath);
+    final exists = await file.exists();
+    final bytes = exists ? await file.length() : 0;
+    final name = imagePath.split(RegExp(r'[\\/]')).last;
+    return {
+      'name': name,
+      'meta': exists ? ' · ${(bytes / 1024).toStringAsFixed(0)} KB' : ' · (file missing)',
+    };
+  }
+
   String _checklistFor(ClaimLine line) => switch (line) {
-        ClaimLine.auto => '''
+        ClaimLine.auto || ClaimLine.commercialAuto => '''
 - [ ] Point of impact / primary panel
 - [ ] Glass / lights / mirrors
 - [ ] Tires / wheels / fluids
 - [ ] Airbags / cabin intrusion
+- [ ] VIN / plate readable?
 - [ ] Driveability concern''',
-        ClaimLine.homeowners => '''
+        ClaimLine.homeowners || ClaimLine.renters => '''
 - [ ] Room / elevation / exterior area
 - [ ] Structure vs contents
 - [ ] Water / fire / storm indicators
 - [ ] Materials affected
 - [ ] Temporary mitigation needed''',
-        ClaimLine.commercial => '''
+        ClaimLine.commercialProperty => '''
 - [ ] Building system / suite / warehouse zone
 - [ ] Inventory / equipment
 - [ ] Business interruption clues
 - [ ] Safety / egress impact
 - [ ] Temporary mitigation''',
+        ClaimLine.generalLiability => '''
+- [ ] Premises condition / hazard
+- [ ] Lighting / signage
+- [ ] Claimant contact point
+- [ ] Witness / camera vantage
+- [ ] Immediate cleanup / changes to scene''',
+        ClaimLine.workersComp => '''
+- [ ] Worksite / equipment involved
+- [ ] Body-part clues (no diagnosis)
+- [ ] Guarding / PPE visible?
+- [ ] Witness vantage
+- [ ] Scene preserved?''',
         ClaimLine.other => '''
 - [ ] What is damaged
 - [ ] Where on site
@@ -150,11 +184,8 @@ Next: complete report fields → export packet.
       };
 }
 
-/// Prefer this name in UI/service — same as [FieldScaffoldEngine].
 typedef PromptOnlyEngine = FieldScaffoldEngine;
 
-/// Optional: local OpenAI-compatible endpoint (LiteRT-LM CLI can serve one).
-/// Still offline if the server is on-box / on-LAN with no cloud.
 class OpenAiCompatibleLocalEngine implements VlmEngine {
   OpenAiCompatibleLocalEngine({
     required this.tier,
@@ -167,8 +198,6 @@ class OpenAiCompatibleLocalEngine implements VlmEngine {
   final VlmTier tier;
   final String baseUrl;
   final String model;
-
-  /// Injected for tests; defaults unused until http wired in UI service.
   final Future<String> Function(Uri url, Map<String, dynamic> body)? httpPost;
 
   @override

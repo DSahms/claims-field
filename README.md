@@ -8,40 +8,40 @@
 | Who | Customer whose stuff is damaged | Insurance agent documenting the scene |
 | Job | Warm interview → report | Photos + VLM captions → fill report fields |
 | Stack | Next.js web | **Flutter** (Windows + Android) |
-| Brain | Venice (sandbox) | SmolVLM ladder **offline** |
+| Brain | Venice (sandbox) | **Qwen2-VL 2B** default · SmolVLM ladder offline |
 
-**GitHub:** https://github.com/DSahms/claims-field
+**GitHub:** https://github.com/DSahms/claims-field  
+**Default VLM:** Qwen2-VL 2B (OCR / VIN)  
+**Forms canon:** [docs/CLAIMS_FORMS_CANON.md](./docs/CLAIMS_FORMS_CANON.md) (ACORD 1/2/3 + FROI)
 
-## Tonight flow (no beta marathon)
+## Claim lines (Product B)
+
+Personal auto · Commercial auto · Homeowners · Renters/personal property · Commercial property · General liability · Workers’ comp (scene) · Other
+
+## Flow
 
 1. `flutter run -d windows` (or Android phone)
-2. **Evidence** → gallery or camera
-3. Auto field draft fills caption + report starters (edit freely)
-4. Optional: flip **Use local VLM server** when LiteRT-LM / OpenAI-compatible vision is on `:8080`
-5. Export packet (markdown + JSON)
+2. Pick claim line → **Evidence** → gallery or camera
+3. Auto field draft fills caption + FNOL starters (edit freely)
+4. Watch **FNOL x/y required** in the app bar; export warns on gaps
+5. Optional: flip **Use local VLM server** when LiteRT-LM vision is on `:8080`
 
 ## Offline model ladder
 
 See [MODEL_LADDER.md](./MODEL_LADDER.md).
 
-- **500M** — your current phone (efficient)
-- **SmolVLM2 2.2B** — step-up, same family, still offline
-- **Qwen2-VL 2B** — alternate offline step-up (OCR)
+- **Qwen2-VL 2B** — default (OCR / paperwork)
+- **500M** — older phone baseline
+- **SmolVLM2 2.2B** — same-family step-up
 
 ## Run
 
 ```powershell
 cd "D:\dev\The Ledger Series\claims-field"
 flutter pub get
-flutter run -d windows   # or an Android device
-```
-
-Build Android APK when ready:
-
-```powershell
-flutter build apk --debug
+flutter run -d windows
 ```
 
 ## Company
 
-AI Integration and Consulting LLC — Claims suite under The Ledger Series. Do not merge A and B into one app; share export packets later.
+AI Integration and Consulting LLC — Claims suite under The Ledger Series. Do not merge A and B; share export packets later.
